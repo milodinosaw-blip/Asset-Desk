@@ -13,8 +13,9 @@
 <link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --navy:#1B2A41;
@@ -263,6 +264,12 @@
     margin-top:4px;
     font-style:italic;
   }
+  .tag .extra{
+    font-size:10.5px;
+    color:var(--slate);
+    margin-top:3px;
+    font-family:'JetBrains Mono',monospace;
+  }
   .qr-thumb{
     width:52px;height:52px;
     background:#fff;
@@ -433,7 +440,7 @@
     <section class="panel active" id="panel-scan">
       <h2 class="section-title">Scan</h2>
       <div class="scan-box" id="scanBox">
-        <div class="placeholder" id="scanPlaceholder">Tap "Start Camera"<br>to scan a tag's QR code</div>
+        <div class="placeholder" id="scanPlaceholder">Tap "Start Camera"<br>to scan a barcode or QR tag</div>
         <video id="video" style="display:none" playsinline muted></video>
         <div class="frame" id="scanFrame" style="display:none"></div>
       </div>
@@ -443,13 +450,20 @@
 
       <div class="search-wrap">
         <span class="field-label">Or find equipment manually</span>
-        <input type="text" id="searchInput" placeholder="Search by name or ID…">
+        <input type="text" id="searchInput" placeholder="Search by name or barcode…">
       </div>
       <div id="searchResults"></div>
     </section>
 
     <!-- INVENTORY PANEL -->
     <section class="panel" id="panel-inventory">
+      <h2 class="section-title">Import from Excel</h2>
+      <div class="card">
+        <p style="font-size:12.5px;color:var(--slate);margin:0 0 12px;line-height:1.5;">Upload your event checkout sheet (Asset ID, Product Name, Serial Number, dates, Status, Storage Location). Items not yet marked "Returned" are loaded as checked out, ready to scan back in.</p>
+        <input type="file" id="excelFile" accept=".xlsx,.xls" style="width:100%;margin-bottom:10px;font-size:13px;">
+        <button class="btn btn-amber" id="importBtn">Import Sheet</button>
+      </div>
+
       <h2 class="section-title">Add Equipment</h2>
       <div class="card">
         <div class="field-group">
@@ -460,12 +474,22 @@
           <span class="field-label">Category</span>
           <input type="text" id="newItemCat" placeholder="e.g. Camera">
         </div>
-        <button class="btn btn-amber" id="addItemBtn">Add & Generate Tag</button>
+        <div class="field-group">
+          <span class="field-label" style="text-transform:none;letter-spacing:0;">Existing barcode <span style="color:var(--slate);font-weight:400;">(leave blank to print a new QR tag)</span></span>
+          <div class="btn-row">
+            <input type="text" id="newItemBarcode" placeholder="Scan or type it in" style="flex:1;width:auto;min-width:0;">
+            <button class="btn btn-outline" id="scanToFillBtn" style="width:auto;flex:0 0 auto;padding:12px 16px;">Scan</button>
+          </div>
+        </div>
+        <button class="btn btn-amber" id="addItemBtn">Add Equipment</button>
       </div>
 
       <h2 class="section-title">Inventory <span id="invCount" style="font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate);font-size:12px;"></span></h2>
       <div id="inventoryList"></div>
-      <button class="btn btn-outline" id="printAllBtn" style="margin-top:6px;">Print All Tags</button>
+      <div class="btn-row" style="margin-top:6px;">
+        <button class="btn btn-outline" id="printAllBtn">Print QR Tags</button>
+        <button class="btn btn-outline" id="exportBtn">Export to Excel</button>
+      </div>
     </section>
 
     <!-- LOG PANEL -->
@@ -507,6 +531,18 @@
         <button class="btn btn-outline" id="modalCancel">Cancel</button>
         <button class="btn btn-primary" id="modalConfirm">Confirm</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="quickScanModal">
+    <div class="modal">
+      <h3>Scan Barcode</h3>
+      <p>Point the camera at the existing barcode or tag.</p>
+      <div class="scan-box" style="margin-bottom:14px;">
+        <video id="videoQuick" playsinline muted style="width:100%;height:100%;object-fit:cover;"></video>
+        <div class="frame"></div>
+      </div>
+      <button class="btn btn-outline" id="quickScanCancel">Cancel</button>
     </div>
   </div>
 
@@ -608,18 +644,163 @@
     new QRCode(container, {text: text, width: size||52, height: size||52, correctLevel: QRCode.CorrectLevel.M});
   }
 
+  // ---------- Excel import ----------
+  $('importBtn').addEventListener('click', async ()=>{
+    const fileInput = $('excelFile');
+    const file = fileInput.files[0];
+    if(!file){ toast('Choose an Excel file first', 'err'); return; }
+    try{
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {type:'array', cellDates:true});
+      let added = 0, updated = 0, outCount = 0;
+
+      wb.SheetNames.forEach(sheetName=>{
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+        // Pull "KEY : VALUE" metadata rows (Event Name, Event Location, Date of Loaned) before the header row
+        let eventName = '', eventLocation = '';
+        let headerRowIdx = -1;
+        for(let i=0;i<rows.length;i++){
+          const cellA = String(rows[i][0] || '').trim();
+          if(/asset\s*id/i.test(cellA)){ headerRowIdx = i; break; }
+          const m = cellA.match(/^([^:]+):\s*(.+)$/);
+          if(m){
+            const key = m[1].trim().toLowerCase();
+            const val = m[2].trim();
+            if(key.includes('event name')) eventName = val;
+            else if(key.includes('event location')) eventLocation = val;
+          }
+        }
+        if(headerRowIdx === -1) return; // not a recognizable sheet, skip
+
+        const headers = rows[headerRowIdx].map(h => String(h||'').trim().toLowerCase());
+        const colIdx = (needle) => headers.findIndex(h => h.includes(needle));
+        const iAsset = colIdx('asset id');
+        const iName = colIdx('product name');
+        const iSerial = colIdx('serial');
+        const iDrawn = colIdx('drawn out');
+        const iReturned = colIdx('item returned');
+        const iStatus = colIdx('status');
+        const iLoc = colIdx('storage location');
+        if(iAsset === -1 || iName === -1) return;
+
+        for(let r=headerRowIdx+1; r<rows.length; r++){
+          const row = rows[r];
+          const barcode = String(row[iAsset]||'').trim();
+          if(!barcode) continue;
+          const name = String(row[iName]||'').trim() || 'Unnamed item';
+          const serial = iSerial>-1 ? String(row[iSerial]||'').trim() : '';
+          const location = iLoc>-1 ? String(row[iLoc]||'').trim() : '';
+          const statusRaw = iStatus>-1 ? String(row[iStatus]||'').trim() : '';
+          const drawnRaw = iDrawn>-1 ? row[iDrawn] : '';
+          const returnedRaw = iReturned>-1 ? row[iReturned] : '';
+          const isReturned = /return/i.test(statusRaw);
+          const drawnTs = (drawnRaw instanceof Date) ? drawnRaw.getTime() : null;
+
+          let item = equipment.find(e=>e.barcode.toLowerCase() === barcode.toLowerCase());
+          if(!item){
+            item = {id: uid('EQ'), barcode, generated:false, holderId:null};
+            equipment.unshift(item);
+            added++;
+          } else {
+            updated++;
+          }
+          item.name = name;
+          item.category = location || item.category || 'General';
+          item.serial = serial;
+          item.status = isReturned ? 'available' : 'checked_out';
+          item.event = isReturned ? null : (eventName || null);
+          item.eventLocation = isReturned ? null : (eventLocation || null);
+          item.checkedOutAt = isReturned ? null : drawnTs;
+          item.returnedDate = (returnedRaw instanceof Date) ? returnedRaw.toISOString() : null;
+          if(!isReturned) outCount++;
+
+          if(!isReturned){
+            log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:'Excel import', action:'checkout', ts: drawnTs || Date.now()});
+          }
+        }
+      });
+
+      if(added + updated === 0){
+        toast('No recognizable rows found — check the sheet has an "Asset ID" header row', 'err');
+        return;
+      }
+      await saveEquipment();
+      await saveLog();
+      renderAll();
+      fileInput.value = '';
+      toast(`Imported ${added} new, updated ${updated} — ${outCount} currently checked out`, 'ok');
+    }catch(err){
+      toast('Could not read that file — check it is a valid .xlsx', 'err');
+    }
+  });
+
+  // ---------- Excel export ----------
+  $('exportBtn').addEventListener('click', ()=>{
+    if(equipment.length === 0){ toast('No equipment to export', 'err'); return; }
+    const rows = equipment.map(item => ({
+      'Asset ID': item.barcode,
+      'Product Name': item.name,
+      'Serial Number': item.serial || '',
+      'Category': item.category || '',
+      'Status': item.status === 'available' ? 'Returned' : 'On Loan',
+      'Event': item.event || '',
+      'Checked Out At': item.checkedOutAt ? new Date(item.checkedOutAt).toLocaleString() : '',
+      'Returned At': item.returnedDate ? new Date(item.returnedDate).toLocaleString() : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Equipment Status');
+    XLSX.writeFile(wb, `asset-desk-export-${new Date().toISOString().slice(0,10)}.xlsx`);
+  });
+
   // ---------- Inventory ----------
   $('addItemBtn').addEventListener('click', async ()=>{
     const name = $('newItemName').value.trim();
     const cat = $('newItemCat').value.trim();
+    const barcodeInput = $('newItemBarcode').value.trim();
     if(!name){ toast('Enter an item name', 'err'); return; }
+    const generated = !barcodeInput;
+    const barcode = barcodeInput || uid('EQ');
+    if(equipment.some(e => e.barcode.toLowerCase() === barcode.toLowerCase())){ toast('That barcode is already registered to another item', 'err'); return; }
     const id = uid('EQ');
-    equipment.unshift({id, name, category: cat || 'General', status:'available', holderId:null, checkedOutAt:null});
-    $('newItemName').value=''; $('newItemCat').value='';
+    equipment.unshift({id, name, category: cat || 'General', barcode, generated, status:'available', holderId:null, checkedOutAt:null});
+    $('newItemName').value=''; $('newItemCat').value=''; $('newItemBarcode').value='';
     await saveEquipment();
     renderAll();
-    toast('Added "'+name+'" — tag generated', 'ok');
+    toast(generated ? `Added "${name}" — QR tag ready to print` : `Added "${name}"`, 'ok');
   });
+
+  // ---------- Quick scan (capture an existing barcode into the add-item form) ----------
+  let quickReader = null;
+  $('scanToFillBtn').addEventListener('click', openQuickScan);
+  $('quickScanCancel').addEventListener('click', closeQuickScan);
+
+  async function openQuickScan(){
+    $('quickScanModal').classList.add('show');
+    try{
+      quickReader = new ZXing.BrowserMultiFormatReader();
+      await quickReader.decodeFromConstraints(
+        {video:{facingMode:'environment'}}, 'videoQuick',
+        (result, err)=>{
+          if(result){
+            $('newItemBarcode').value = result.getText().trim();
+            toast('Barcode captured', 'ok');
+            closeQuickScan();
+          }
+        }
+      );
+    }catch(err){
+      toast('Camera unavailable — type the barcode instead', 'err');
+      closeQuickScan();
+    }
+  }
+
+  function closeQuickScan(){
+    $('quickScanModal').classList.remove('show');
+    if(quickReader){ try{ quickReader.reset(); }catch(e){} quickReader = null; }
+  }
 
   function renderInventory(){
     const list = $('inventoryList');
@@ -634,41 +815,40 @@
       tag.className = 'tag';
       const holder = item.holderId ? (staff.find(s=>s.id===item.holderId)?.name || 'Unknown') : null;
       tag.innerHTML = `
-        <div class="qr-thumb" id="qr-${item.id}"></div>
+        ${item.generated ? `<div class="qr-thumb" id="qr-${item.id}"></div>` : ''}
         <div class="tag-meta">
-          <div class="tag-id">${item.id}</div>
+          <div class="tag-id">${escapeHtml(item.barcode)}</div>
           <div class="tag-name">${escapeHtml(item.name)}</div>
           <div class="tag-cat">${escapeHtml(item.category)}</div>
-          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : ''}
+          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : (item.event ? `<div class="holder">out for ${escapeHtml(item.event)}</div>` : '')}
         </div>
         <div class="stamp ${item.status==='available'?'available':'out'}">${item.status==='available'?'Available':'Checked Out'}</div>
       `;
       list.appendChild(tag);
-      renderQr($('qr-'+item.id), 'EQUIP:'+item.id, 52);
+      if(item.generated) renderQr($('qr-'+item.id), 'EQUIP:'+item.barcode, 52);
     });
   }
 
   $('printAllBtn').addEventListener('click', ()=>{
-    if(equipment.length===0){ toast('No equipment to print', 'err'); return; }
+    const toPrint = equipment.filter(e=>e.generated);
+    if(toPrint.length===0){ toast('No auto-generated tags to print — items with existing barcodes don\'t need one', 'err'); return; }
     const w = window.open('', '_blank');
     w.document.write('<html><head><title>Print Tags</title><style>body{font-family:sans-serif;display:flex;flex-wrap:wrap;gap:16px;padding:20px;}.t{border:1px dashed #999;border-radius:8px;padding:12px;width:180px;text-align:center;}</style></head><body></body></html>');
     w.document.close();
-    equipment.forEach(item=>{
+    toPrint.forEach(item=>{
       const div = w.document.createElement('div');
       div.className = 't';
-      div.innerHTML = `<div style="font-weight:bold;margin-bottom:6px;">${escapeHtml(item.name)}</div><div id="p-${item.id}"></div><div style="font-family:monospace;font-size:11px;margin-top:6px;">${item.id}</div>`;
+      div.innerHTML = `<div style="font-weight:bold;margin-bottom:6px;">${escapeHtml(item.name)}</div><div id="p-${item.id}"></div><div style="font-family:monospace;font-size:11px;margin-top:6px;">${escapeHtml(item.barcode)}</div>`;
       w.document.body.appendChild(div);
-      new w.QRCode(div.querySelector('#p-'+item.id), {text:'EQUIP:'+item.id, width:120, height:120});
     });
     // inject qrcode lib into new window
     const script = w.document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
     w.document.head.appendChild(script);
     script.onload = ()=>{
-      w.document.querySelectorAll('.t > div[id^="p-"]').forEach(el=> el.innerHTML='');
-      equipment.forEach(item=>{
+      toPrint.forEach(item=>{
         const target = w.document.getElementById('p-'+item.id);
-        if(target) new w.QRCode(target, {text:'EQUIP:'+item.id, width:120, height:120});
+        if(target) new w.QRCode(target, {text:'EQUIP:'+item.barcode, width:120, height:120});
       });
       setTimeout(()=> w.print(), 400);
     };
@@ -715,7 +895,7 @@
     const q = $('searchInput').value.trim().toLowerCase();
     const results = $('searchResults');
     if(!q){ results.innerHTML = ''; return; }
-    const matches = equipment.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
+    const matches = equipment.filter(e => e.name.toLowerCase().includes(q) || e.barcode.toLowerCase().includes(q));
     if(matches.length===0){ results.innerHTML = '<div class="empty">No matches</div>'; return; }
     results.innerHTML = '';
     matches.slice(0,8).forEach(item=>{
@@ -725,22 +905,24 @@
       const holder = item.holderId ? (staff.find(s=>s.id===item.holderId)?.name || 'Unknown') : null;
       tag.innerHTML = `
         <div class="tag-meta">
-          <div class="tag-id">${item.id}</div>
+          <div class="tag-id">${escapeHtml(item.barcode)}</div>
           <div class="tag-name">${escapeHtml(item.name)}</div>
           <div class="tag-cat">${escapeHtml(item.category)}</div>
-          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : ''}
+          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : (item.event ? `<div class="holder">out for ${escapeHtml(item.event)}</div>` : '')}
         </div>
         <div class="stamp ${item.status==='available'?'available':'out'}">${item.status==='available'?'Available':'Checked Out'}</div>
       `;
-      tag.addEventListener('click', ()=> handleScannedItem(item.id));
+      tag.addEventListener('click', ()=> handleScannedItem(item.barcode));
       results.appendChild(tag);
     });
   }
 
   // ---------- Scan handling ----------
-  function handleScannedItem(equipId){
-    const item = equipment.find(e=>e.id===equipId);
-    if(!item){ toast('Unrecognized tag', 'err'); return; }
+  function handleScannedItem(scannedValue){
+    // Accept raw barcode text, or the app's own generated "EQUIP:<barcode>" QR payload
+    const value = (scannedValue.match(/^EQUIP:(.+)$/) || [null, scannedValue])[1].trim();
+    const item = equipment.find(e=>e.barcode.toLowerCase() === value.toLowerCase());
+    if(!item){ toast('No equipment matches that barcode — add it in Inventory first', 'err'); return; }
     const actorId = $('actingAs').value;
     if(!actorId){ toast('Add a staff member first, then select "Acting as"', 'err'); return; }
     const actor = staff.find(s=>s.id===actorId);
@@ -751,9 +933,10 @@
       $('modalBody').textContent = `Check out "${item.name}" to ${actor.name}?`;
     } else {
       const holder = staff.find(s=>s.id===item.holderId);
-      pendingAction = {type:'checkin', item, actor, holder};
+      const withWhom = holder ? holder.name : (item.event ? `out for ${item.event}` : 'someone');
+      pendingAction = {type:'checkin', item, actor};
       $('modalTitle').textContent = 'Check In';
-      $('modalBody').textContent = `Check in "${item.name}" (currently with ${holder ? holder.name : 'someone'})?`;
+      $('modalBody').textContent = `Check in "${item.name}" (currently ${holder ? 'with '+withWhom : withWhom})? Marks it ready to go back to storage.`;
     }
     $('confirmModal').classList.add('show');
   }
@@ -777,6 +960,9 @@
       item.status = 'available';
       item.holderId = null;
       item.checkedOutAt = null;
+      item.event = null;
+      item.eventLocation = null;
+      item.returnedDate = new Date().toISOString();
       toast(`"${item.name}" checked in`, 'ok');
     }
     await saveEquipment();
@@ -788,61 +974,45 @@
     $('searchResults').innerHTML = '';
   });
 
-  // ---------- Camera ----------
+  // ---------- Camera (ZXing: reads QR codes and standard 1D barcodes) ----------
+  let codeReader = null;
+  let lastScan = 0;
+
   $('camToggle').addEventListener('click', ()=>{
     if(scanning) stopCamera(); else startCamera();
   });
 
   async function startCamera(){
     try{
-      stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-      const video = $('video');
-      video.srcObject = stream;
-      video.style.display = 'block';
+      $('video').style.display = 'block';
       $('scanFrame').style.display = 'block';
       $('scanPlaceholder').style.display = 'none';
-      await video.play();
+      codeReader = new ZXing.BrowserMultiFormatReader();
       scanning = true;
       $('camToggle').textContent = 'Stop Camera';
-      requestAnimationFrame(scanLoop);
+      await codeReader.decodeFromConstraints(
+        {video:{facingMode:'environment'}}, 'video',
+        (result, err)=>{
+          if(result && Date.now() - lastScan > 1500){
+            lastScan = Date.now();
+            handleScannedItem(result.getText());
+          }
+        }
+      );
     }catch(err){
+      scanning = false;
+      $('camToggle').textContent = 'Start Camera';
       toast('Camera unavailable — use search below instead', 'err');
     }
   }
 
   function stopCamera(){
     scanning = false;
-    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    if(codeReader){ try{ codeReader.reset(); }catch(e){} codeReader = null; }
     $('video').style.display = 'none';
     $('scanFrame').style.display = 'none';
     $('scanPlaceholder').style.display = 'block';
     $('camToggle').textContent = 'Start Camera';
-  }
-
-  const canvasEl = document.createElement('canvas');
-  const canvasCtx = canvasEl.getContext('2d');
-  let lastScan = 0;
-
-  function scanLoop(){
-    if(!scanning) return;
-    const video = $('video');
-    if(video.readyState === video.HAVE_ENOUGH_DATA){
-      canvasEl.width = video.videoWidth;
-      canvasEl.height = video.videoHeight;
-      canvasCtx.drawImage(video, 0, 0, canvasEl.width, canvasEl.height);
-      const imageData = canvasCtx.getImageData(0,0,canvasEl.width, canvasEl.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      if(code && code.data && Date.now() - lastScan > 1500){
-        lastScan = Date.now();
-        const match = code.data.match(/^EQUIP:(.+)$/);
-        if(match){
-          handleScannedItem(match[1]);
-        } else {
-          toast('Not a recognized asset tag', 'err');
-        }
-      }
-    }
-    requestAnimationFrame(scanLoop);
   }
 
   // ---------- Log ----------
