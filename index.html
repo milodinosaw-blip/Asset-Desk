@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Asset Desk — Equipment Checkout</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2A41">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Asset Desk">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --navy:#1B2A41;
+    --navy-light:#2A3E5C;
+    --cream:#F7F5F0;
+    --paper:#FFFDF8;
+    --amber:#E8A33D;
+    --amber-dark:#C4841F;
+    --green:#3B7A57;
+    --green-bg:#E7F0EA;
+    --rust:#C1502E;
+    --rust-bg:#F7E9E4;
+    --slate:#5C6B73;
+    --line:#DCD6C8;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  html,body{
+    background:var(--cream);
+    color:var(--navy);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    background:var(--paper);
+    display:flex;
+    flex-direction:column;
+    position:relative;
+    border-left:1px solid var(--line);
+    border-right:1px solid var(--line);
+  }
+  header.top{
+    background:var(--navy);
+    color:var(--cream);
+    padding:18px 20px 16px;
+    position:sticky;
+    top:0;
+    z-index:20;
+  }
+  header.top .brand{
+    font-family:'Oswald',sans-serif;
+    font-weight:600;
+    font-size:22px;
+    letter-spacing:0.5px;
+    text-transform:uppercase;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  header.top .brand .dot{
+    width:9px;height:9px;border-radius:50%;
+    background:var(--amber);
+    display:inline-block;
+  }
+  header.top .sub{
+    font-size:12px;
+    color:#B9C2CF;
+    margin-top:3px;
+    font-family:'JetBrains Mono',monospace;
+    letter-spacing:0.3px;
+  }
+  .acting-as{
+    margin-top:12px;
+    background:var(--navy-light);
+    border-radius:8px;
+    padding:8px 10px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .acting-as label{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    color:#B9C2CF;
+    font-family:'Oswald',sans-serif;
+    white-space:nowrap;
+  }
+  .acting-as select{
+    flex:1;
+    background:transparent;
+    border:none;
+    color:var(--cream);
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:14px;
+    padding:4px;
+  }
+  .acting-as select option{color:#111;}
+
+  main{
+    flex:1;
+    padding:16px 16px 90px;
+    overflow-y:auto;
+  }
+  .panel{display:none;}
+  .panel.active{display:block;animation:fade .18s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+
+  h2.section-title{
+    font-family:'Oswald',sans-serif;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    font-size:15px;
+    font-weight:600;
+    color:var(--navy);
+    margin:4px 0 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  h2.section-title::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line);
+  }
+
+  /* Scan panel */
+  .scan-box{
+    background:var(--navy);
+    border-radius:14px;
+    overflow:hidden;
+    position:relative;
+    aspect-ratio:1/1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    margin-bottom:14px;
+  }
+  .scan-box video{width:100%;height:100%;object-fit:cover;}
+  .scan-box .frame{
+    position:absolute;inset:14%;
+    border:2px solid var(--amber);
+    border-radius:12px;
+    box-shadow:0 0 0 999px rgba(27,42,65,0.35);
+    pointer-events:none;
+  }
+  .scan-box .placeholder{
+    color:#8996A6;
+    font-family:'JetBrains Mono',monospace;
+    font-size:13px;
+    text-align:center;
+    padding:20px;
+  }
+  .btn{
+    border:none;
+    border-radius:9px;
+    padding:13px 16px;
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:14.5px;
+    cursor:pointer;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    width:100%;
+    transition:transform .08s ease, filter .12s ease;
+  }
+  .btn:active{transform:scale(0.98);}
+  .btn-primary{background:var(--navy);color:var(--cream);}
+  .btn-amber{background:var(--amber);color:var(--navy);}
+  .btn-outline{background:transparent;color:var(--navy);border:1.5px solid var(--navy);}
+  .btn-danger{background:var(--rust);color:#fff;}
+  .btn-row{display:flex;gap:10px;}
+  .btn-row .btn{width:auto;flex:1;}
+
+  .search-wrap{margin:14px 0 10px;position:relative;}
+  input[type=text], select.field{
+    width:100%;
+    padding:12px 14px;
+    border-radius:9px;
+    border:1.5px solid var(--line);
+    background:var(--paper);
+    font-family:'Inter',sans-serif;
+    font-size:14.5px;
+    color:var(--navy);
+  }
+  input[type=text]:focus, select.field:focus{outline:2px solid var(--amber);outline-offset:1px;}
+
+  /* Asset tag card - signature element */
+  .tag{
+    background:var(--paper);
+    border:1.5px dashed var(--line);
+    border-radius:10px;
+    padding:14px;
+    margin-bottom:12px;
+    position:relative;
+    display:flex;
+    gap:12px;
+    align-items:center;
+  }
+  .tag::before, .tag::after{
+    content:"";
+    position:absolute;
+    width:14px;height:14px;
+    background:var(--cream);
+    border:1.5px solid var(--line);
+    border-radius:50%;
+    top:50%;
+    transform:translateY(-50%);
+  }
+  .tag::before{left:-8px;}
+  .tag::after{right:-8px;}
+  .tag .tag-id{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    color:var(--slate);
+    letter-spacing:0.5px;
+  }
+  .tag .tag-name{
+    font-family:'Oswald',sans-serif;
+    font-weight:600;
+    font-size:16px;
+    color:var(--navy);
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+  }
+  .tag .tag-cat{
+    font-size:12px;
+    color:var(--slate);
+    margin-top:1px;
+  }
+  .tag .tag-meta{flex:1;min-width:0;}
+  .stamp{
+    font-family:'Oswald',sans-serif;
+    font-size:10.5px;
+    font-weight:700;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    padding:5px 9px;
+    border-radius:5px;
+    border:1.5px solid currentColor;
+    white-space:nowrap;
+    transform:rotate(-3deg);
+  }
+  .stamp.available{color:var(--green);background:var(--green-bg);}
+  .stamp.out{color:var(--rust);background:var(--rust-bg);}
+  .tag .holder{
+    font-size:11px;
+    color:var(--slate);
+    margin-top:4px;
+    font-style:italic;
+  }
+  .qr-thumb{
+    width:52px;height:52px;
+    background:#fff;
+    border-radius:6px;
+    border:1px solid var(--line);
+    flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  .qr-thumb canvas, .qr-thumb img{width:100%;height:100%;}
+
+  /* Inventory add form */
+  .card{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:16px;
+    margin-bottom:16px;
+  }
+  .field-label{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    color:var(--slate);
+    font-family:'Oswald',sans-serif;
+    margin-bottom:5px;
+    display:block;
+  }
+  .field-group{margin-bottom:12px;}
+
+  /* Log */
+  .log-item{
+    display:flex;
+    gap:12px;
+    padding:11px 0;
+    border-bottom:1px solid var(--line);
+    align-items:flex-start;
+  }
+  .log-item:last-child{border-bottom:none;}
+  .log-icon{
+    width:30px;height:30px;
+    border-radius:50%;
+    flex-shrink:0;
+    display:flex;align-items:center;justify-content:center;
+    font-family:'Oswald',sans-serif;
+    font-weight:700;
+    font-size:13px;
+  }
+  .log-icon.out{background:var(--rust-bg);color:var(--rust);}
+  .log-icon.in{background:var(--green-bg);color:var(--green);}
+  .log-text{font-size:13.5px;color:var(--navy);line-height:1.4;}
+  .log-text b{font-weight:600;}
+  .log-time{font-size:11px;color:var(--slate);font-family:'JetBrains Mono',monospace;margin-top:2px;}
+
+  .empty{
+    text-align:center;
+    padding:40px 20px;
+    color:var(--slate);
+    font-size:13.5px;
+  }
+  .empty .big{
+    font-family:'Oswald',sans-serif;
+    text-transform:uppercase;
+    font-size:14px;
+    color:var(--navy);
+    margin-bottom:4px;
+  }
+
+  nav.bottom{
+    position:sticky;
+    bottom:0;
+    background:var(--navy);
+    display:flex;
+    z-index:20;
+    border-top:1px solid var(--navy-light);
+  }
+  nav.bottom button{
+    flex:1;
+    background:none;
+    border:none;
+    color:#8996A6;
+    padding:11px 4px 9px;
+    font-family:'Oswald',sans-serif;
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    cursor:pointer;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:4px;
+  }
+  nav.bottom button.active{color:var(--amber);}
+  nav.bottom button .ic{font-size:18px;line-height:1;}
+
+  .toast{
+    position:fixed;
+    bottom:80px;
+    left:50%;
+    transform:translateX(-50%) translateY(20px);
+    background:var(--navy);
+    color:var(--cream);
+    padding:12px 18px;
+    border-radius:9px;
+    font-size:13.5px;
+    font-weight:500;
+    box-shadow:0 8px 24px rgba(0,0,0,0.25);
+    opacity:0;
+    pointer-events:none;
+    transition:all .25s ease;
+    z-index:50;
+    max-width:90%;
+    text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  .toast.err{background:var(--rust);}
+  .toast.ok{background:var(--green);}
+
+  .staff-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 0;border-bottom:1px solid var(--line);
+  }
+  .staff-row:last-child{border-bottom:none;}
+  .staff-name{font-size:14.5px;font-weight:500;}
+  .icon-btn{
+    background:none;border:none;color:var(--rust);
+    font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;
+    padding:4px 8px;
+  }
+
+  .modal-bg{
+    position:fixed;inset:0;background:rgba(27,42,65,0.55);
+    display:none;align-items:flex-end;justify-content:center;z-index:60;
+  }
+  .modal-bg.show{display:flex;}
+  .modal{
+    background:var(--paper);
+    width:100%;max-width:480px;
+    border-radius:16px 16px 0 0;
+    padding:22px 20px 26px;
+    animation:slideup .2s ease;
+  }
+  @keyframes slideup{from{transform:translateY(100%);}to{transform:translateY(0);}}
+  .modal h3{
+    font-family:'Oswald',sans-serif;
+    text-transform:uppercase;
+    font-size:16px;margin:0 0 4px;
+  }
+  .modal p{font-size:13.5px;color:var(--slate);margin:0 0 16px;}
+  .print-list{display:none;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="top">
+    <div class="brand"><span class="dot"></span>Asset Desk</div>
+    <div class="sub" id="deviceCount">— equipment tracker</div>
+    <div class="acting-as">
+      <label>Acting as</label>
+      <select id="actingAs" class="field"></select>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- SCAN PANEL -->
+    <section class="panel active" id="panel-scan">
+      <h2 class="section-title">Scan</h2>
+      <div class="scan-box" id="scanBox">
+        <div class="placeholder" id="scanPlaceholder">Tap "Start Camera"<br>to scan a tag's QR code</div>
+        <video id="video" style="display:none" playsinline muted></video>
+        <div class="frame" id="scanFrame" style="display:none"></div>
+      </div>
+      <div class="btn-row" style="margin-bottom:14px;">
+        <button class="btn btn-primary" id="camToggle">Start Camera</button>
+      </div>
+
+      <div class="search-wrap">
+        <span class="field-label">Or find equipment manually</span>
+        <input type="text" id="searchInput" placeholder="Search by name or ID…">
+      </div>
+      <div id="searchResults"></div>
+    </section>
+
+    <!-- INVENTORY PANEL -->
+    <section class="panel" id="panel-inventory">
+      <h2 class="section-title">Add Equipment</h2>
+      <div class="card">
+        <div class="field-group">
+          <span class="field-label">Item name</span>
+          <input type="text" id="newItemName" placeholder="e.g. Canon EOS R6">
+        </div>
+        <div class="field-group">
+          <span class="field-label">Category</span>
+          <input type="text" id="newItemCat" placeholder="e.g. Camera">
+        </div>
+        <button class="btn btn-amber" id="addItemBtn">Add & Generate Tag</button>
+      </div>
+
+      <h2 class="section-title">Inventory <span id="invCount" style="font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-weight:400;color:var(--slate);font-size:12px;"></span></h2>
+      <div id="inventoryList"></div>
+      <button class="btn btn-outline" id="printAllBtn" style="margin-top:6px;">Print All Tags</button>
+    </section>
+
+    <!-- LOG PANEL -->
+    <section class="panel" id="panel-log">
+      <h2 class="section-title">Activity Log</h2>
+      <div class="card" id="logList" style="padding:6px 16px;"></div>
+    </section>
+
+    <!-- STAFF PANEL -->
+    <section class="panel" id="panel-staff">
+      <h2 class="section-title">Add Staff</h2>
+      <div class="card">
+        <div class="field-group">
+          <span class="field-label">Full name</span>
+          <input type="text" id="newStaffName" placeholder="e.g. Priya Nair">
+        </div>
+        <button class="btn btn-amber" id="addStaffBtn">Add Staff Member</button>
+      </div>
+      <h2 class="section-title">Staff</h2>
+      <div class="card" id="staffList" style="padding:4px 16px;"></div>
+    </section>
+
+  </main>
+
+  <nav class="bottom">
+    <button class="active" data-panel="scan"><span class="ic">▣</span>Scan</button>
+    <button data-panel="inventory"><span class="ic">▤</span>Inventory</button>
+    <button data-panel="log"><span class="ic">≡</span>Log</button>
+    <button data-panel="staff"><span class="ic">◍</span>Staff</button>
+  </nav>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="modal-bg" id="confirmModal">
+    <div class="modal">
+      <h3 id="modalTitle">Confirm</h3>
+      <p id="modalBody"></p>
+      <div class="btn-row">
+        <button class="btn btn-outline" id="modalCancel">Cancel</button>
+        <button class="btn btn-primary" id="modalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  let equipment = [];
+  let staff = [];
+  let log = [];
+  let stream = null;
+  let scanning = false;
+  let pendingAction = null;
+
+  const $ = id => document.getElementById(id);
+
+  function toast(msg, kind){
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (kind ? ' '+kind : '');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(()=> t.className = 'toast', 2200);
+  }
+
+  function uid(prefix){
+    return prefix + '-' + Math.random().toString(36).slice(2,7).toUpperCase();
+  }
+
+  function fmtTime(ts){
+    const d = new Date(ts);
+    return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}) + ' · ' +
+           d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+  }
+
+  // ---------- Storage ----------
+  async function loadAll(){
+    try{
+      const e = await window.storage.get('equipment-list', true);
+      equipment = e ? JSON.parse(e.value) : [];
+    }catch(err){ equipment = []; }
+    try{
+      const s = await window.storage.get('staff-list', true);
+      staff = s ? JSON.parse(s.value) : [];
+    }catch(err){ staff = []; }
+    try{
+      const l = await window.storage.get('activity-log', true);
+      log = l ? JSON.parse(l.value) : [];
+    }catch(err){ log = []; }
+    renderAll();
+  }
+
+  async function saveEquipment(){
+    try{ await window.storage.set('equipment-list', JSON.stringify(equipment), true); }
+    catch(err){ toast('Could not save — try again', 'err'); }
+  }
+  async function saveStaff(){
+    try{ await window.storage.set('staff-list', JSON.stringify(staff), true); }
+    catch(err){ toast('Could not save — try again', 'err'); }
+  }
+  async function saveLog(){
+    try{ await window.storage.set('activity-log', JSON.stringify(log.slice(0,200)), true); }
+    catch(err){ toast('Could not save — try again', 'err'); }
+  }
+
+  // ---------- Nav ----------
+  document.querySelectorAll('nav.bottom button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('nav.bottom button').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      $('panel-'+btn.dataset.panel).classList.add('active');
+      if(btn.dataset.panel !== 'scan') stopCamera();
+    });
+  });
+
+  // ---------- Acting as ----------
+  function renderActingAs(){
+    const sel = $('actingAs');
+    const cur = sel.value;
+    if(staff.length === 0){
+      sel.innerHTML = '<option value="">Add staff first →</option>';
+      return;
+    }
+    sel.innerHTML = staff.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+    if(cur && staff.some(s=>s.id===cur)) sel.value = cur;
+  }
+
+  function escapeHtml(str){
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // ---------- QR generation ----------
+  function renderQr(container, text, size){
+    container.innerHTML = '';
+    new QRCode(container, {text: text, width: size||52, height: size||52, correctLevel: QRCode.CorrectLevel.M});
+  }
+
+  // ---------- Inventory ----------
+  $('addItemBtn').addEventListener('click', async ()=>{
+    const name = $('newItemName').value.trim();
+    const cat = $('newItemCat').value.trim();
+    if(!name){ toast('Enter an item name', 'err'); return; }
+    const id = uid('EQ');
+    equipment.unshift({id, name, category: cat || 'General', status:'available', holderId:null, checkedOutAt:null});
+    $('newItemName').value=''; $('newItemCat').value='';
+    await saveEquipment();
+    renderAll();
+    toast('Added "'+name+'" — tag generated', 'ok');
+  });
+
+  function renderInventory(){
+    const list = $('inventoryList');
+    $('invCount').textContent = equipment.length ? `(${equipment.length})` : '';
+    if(equipment.length === 0){
+      list.innerHTML = '<div class="empty"><div class="big">No equipment yet</div>Add your first item above.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    equipment.forEach(item=>{
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      const holder = item.holderId ? (staff.find(s=>s.id===item.holderId)?.name || 'Unknown') : null;
+      tag.innerHTML = `
+        <div class="qr-thumb" id="qr-${item.id}"></div>
+        <div class="tag-meta">
+          <div class="tag-id">${item.id}</div>
+          <div class="tag-name">${escapeHtml(item.name)}</div>
+          <div class="tag-cat">${escapeHtml(item.category)}</div>
+          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : ''}
+        </div>
+        <div class="stamp ${item.status==='available'?'available':'out'}">${item.status==='available'?'Available':'Checked Out'}</div>
+      `;
+      list.appendChild(tag);
+      renderQr($('qr-'+item.id), 'EQUIP:'+item.id, 52);
+    });
+  }
+
+  $('printAllBtn').addEventListener('click', ()=>{
+    if(equipment.length===0){ toast('No equipment to print', 'err'); return; }
+    const w = window.open('', '_blank');
+    w.document.write('<html><head><title>Print Tags</title><style>body{font-family:sans-serif;display:flex;flex-wrap:wrap;gap:16px;padding:20px;}.t{border:1px dashed #999;border-radius:8px;padding:12px;width:180px;text-align:center;}</style></head><body></body></html>');
+    w.document.close();
+    equipment.forEach(item=>{
+      const div = w.document.createElement('div');
+      div.className = 't';
+      div.innerHTML = `<div style="font-weight:bold;margin-bottom:6px;">${escapeHtml(item.name)}</div><div id="p-${item.id}"></div><div style="font-family:monospace;font-size:11px;margin-top:6px;">${item.id}</div>`;
+      w.document.body.appendChild(div);
+      new w.QRCode(div.querySelector('#p-'+item.id), {text:'EQUIP:'+item.id, width:120, height:120});
+    });
+    // inject qrcode lib into new window
+    const script = w.document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    w.document.head.appendChild(script);
+    script.onload = ()=>{
+      w.document.querySelectorAll('.t > div[id^="p-"]').forEach(el=> el.innerHTML='');
+      equipment.forEach(item=>{
+        const target = w.document.getElementById('p-'+item.id);
+        if(target) new w.QRCode(target, {text:'EQUIP:'+item.id, width:120, height:120});
+      });
+      setTimeout(()=> w.print(), 400);
+    };
+  });
+
+  // ---------- Staff ----------
+  $('addStaffBtn').addEventListener('click', async ()=>{
+    const name = $('newStaffName').value.trim();
+    if(!name){ toast('Enter a name', 'err'); return; }
+    staff.push({id: uid('ST'), name});
+    $('newStaffName').value = '';
+    await saveStaff();
+    renderAll();
+    toast('Added '+name, 'ok');
+  });
+
+  function renderStaffList(){
+    const list = $('staffList');
+    if(staff.length===0){
+      list.innerHTML = '<div class="empty"><div class="big">No staff yet</div>Add your team above.</div>';
+      return;
+    }
+    list.innerHTML = staff.map(s=>`
+      <div class="staff-row">
+        <span class="staff-name">${escapeHtml(s.name)}</span>
+        <button class="icon-btn" data-staffid="${s.id}">Remove</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('.icon-btn').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const id = b.dataset.staffid;
+        const inUse = equipment.some(e=>e.holderId===id);
+        if(inUse){ toast('This person currently has equipment checked out', 'err'); return; }
+        staff = staff.filter(s=>s.id!==id);
+        await saveStaff();
+        renderAll();
+      });
+    });
+  }
+
+  // ---------- Search / manual select ----------
+  $('searchInput').addEventListener('input', renderSearchResults);
+  function renderSearchResults(){
+    const q = $('searchInput').value.trim().toLowerCase();
+    const results = $('searchResults');
+    if(!q){ results.innerHTML = ''; return; }
+    const matches = equipment.filter(e => e.name.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
+    if(matches.length===0){ results.innerHTML = '<div class="empty">No matches</div>'; return; }
+    results.innerHTML = '';
+    matches.slice(0,8).forEach(item=>{
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      tag.style.cursor = 'pointer';
+      const holder = item.holderId ? (staff.find(s=>s.id===item.holderId)?.name || 'Unknown') : null;
+      tag.innerHTML = `
+        <div class="tag-meta">
+          <div class="tag-id">${item.id}</div>
+          <div class="tag-name">${escapeHtml(item.name)}</div>
+          <div class="tag-cat">${escapeHtml(item.category)}</div>
+          ${holder ? `<div class="holder">with ${escapeHtml(holder)}</div>` : ''}
+        </div>
+        <div class="stamp ${item.status==='available'?'available':'out'}">${item.status==='available'?'Available':'Checked Out'}</div>
+      `;
+      tag.addEventListener('click', ()=> handleScannedItem(item.id));
+      results.appendChild(tag);
+    });
+  }
+
+  // ---------- Scan handling ----------
+  function handleScannedItem(equipId){
+    const item = equipment.find(e=>e.id===equipId);
+    if(!item){ toast('Unrecognized tag', 'err'); return; }
+    const actorId = $('actingAs').value;
+    if(!actorId){ toast('Add a staff member first, then select "Acting as"', 'err'); return; }
+    const actor = staff.find(s=>s.id===actorId);
+
+    if(item.status === 'available'){
+      pendingAction = {type:'checkout', item, actor};
+      $('modalTitle').textContent = 'Check Out';
+      $('modalBody').textContent = `Check out "${item.name}" to ${actor.name}?`;
+    } else {
+      const holder = staff.find(s=>s.id===item.holderId);
+      pendingAction = {type:'checkin', item, actor, holder};
+      $('modalTitle').textContent = 'Check In';
+      $('modalBody').textContent = `Check in "${item.name}" (currently with ${holder ? holder.name : 'someone'})?`;
+    }
+    $('confirmModal').classList.add('show');
+  }
+
+  $('modalCancel').addEventListener('click', ()=>{
+    $('confirmModal').classList.remove('show');
+    pendingAction = null;
+  });
+
+  $('modalConfirm').addEventListener('click', async ()=>{
+    if(!pendingAction) return;
+    const {type, item, actor} = pendingAction;
+    if(type === 'checkout'){
+      item.status = 'checked_out';
+      item.holderId = actor.id;
+      item.checkedOutAt = Date.now();
+      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkout', ts:Date.now()});
+      toast(`"${item.name}" checked out to ${actor.name}`, 'ok');
+    } else {
+      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkin', ts:Date.now()});
+      item.status = 'available';
+      item.holderId = null;
+      item.checkedOutAt = null;
+      toast(`"${item.name}" checked in`, 'ok');
+    }
+    await saveEquipment();
+    await saveLog();
+    renderAll();
+    $('confirmModal').classList.remove('show');
+    pendingAction = null;
+    $('searchInput').value = '';
+    $('searchResults').innerHTML = '';
+  });
+
+  // ---------- Camera ----------
+  $('camToggle').addEventListener('click', ()=>{
+    if(scanning) stopCamera(); else startCamera();
+  });
+
+  async function startCamera(){
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+      const video = $('video');
+      video.srcObject = stream;
+      video.style.display = 'block';
+      $('scanFrame').style.display = 'block';
+      $('scanPlaceholder').style.display = 'none';
+      await video.play();
+      scanning = true;
+      $('camToggle').textContent = 'Stop Camera';
+      requestAnimationFrame(scanLoop);
+    }catch(err){
+      toast('Camera unavailable — use search below instead', 'err');
+    }
+  }
+
+  function stopCamera(){
+    scanning = false;
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    $('video').style.display = 'none';
+    $('scanFrame').style.display = 'none';
+    $('scanPlaceholder').style.display = 'block';
+    $('camToggle').textContent = 'Start Camera';
+  }
+
+  const canvasEl = document.createElement('canvas');
+  const canvasCtx = canvasEl.getContext('2d');
+  let lastScan = 0;
+
+  function scanLoop(){
+    if(!scanning) return;
+    const video = $('video');
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvasEl.width = video.videoWidth;
+      canvasEl.height = video.videoHeight;
+      canvasCtx.drawImage(video, 0, 0, canvasEl.width, canvasEl.height);
+      const imageData = canvasCtx.getImageData(0,0,canvasEl.width, canvasEl.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if(code && code.data && Date.now() - lastScan > 1500){
+        lastScan = Date.now();
+        const match = code.data.match(/^EQUIP:(.+)$/);
+        if(match){
+          handleScannedItem(match[1]);
+        } else {
+          toast('Not a recognized asset tag', 'err');
+        }
+      }
+    }
+    requestAnimationFrame(scanLoop);
+  }
+
+  // ---------- Log ----------
+  function renderLog(){
+    const list = $('logList');
+    if(log.length===0){
+      list.innerHTML = '<div class="empty"><div class="big">No activity yet</div>Checkouts and check-ins will appear here.</div>';
+      return;
+    }
+    list.innerHTML = log.map(entry=>`
+      <div class="log-item">
+        <div class="log-icon ${entry.action==='checkout'?'out':'in'}">${entry.action==='checkout'?'↑':'↓'}</div>
+        <div>
+          <div class="log-text"><b>${escapeHtml(entry.staffName)}</b> ${entry.action==='checkout'?'checked out':'checked in'} <b>${escapeHtml(entry.equipName)}</b></div>
+          <div class="log-time">${fmtTime(entry.ts)}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderAll(){
+    renderActingAs();
+    renderInventory();
+    renderStaffList();
+    renderLog();
+    const outCount = equipment.filter(e=>e.status==='checked_out').length;
+    $('deviceCount').textContent = `${equipment.length} items tracked · ${outCount} checked out`;
+    renderSearchResults();
+  }
+
+  loadAll();
+
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('sw.js').catch(()=>{ /* offline support unavailable */ });
+    });
+  }
+})();
+</script>
+</body>
+</html>
