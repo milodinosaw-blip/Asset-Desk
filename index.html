@@ -16,6 +16,8 @@
 <script src="https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
   :root{
     --navy:#1B2A41;
@@ -591,6 +593,62 @@
 
   const $ = id => document.getElementById(id);
 
+  // ---------- Firebase (real, persistent, shared cloud storage) ----------
+  const firebaseConfig = {
+    apiKey: "AIzaSyDQaIs_5jIovkjRuChZla5sVJuXBoMfbS0",
+    authDomain: "e3a-asset-desk.firebaseapp.com",
+    projectId: "e3a-asset-desk",
+    storageBucket: "e3a-asset-desk.firebasestorage.app",
+    messagingSenderId: "277916699423",
+    appId: "1:277916699423:web:0ad1db755910ce48307e2a"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const FS_COLLECTION = 'e3a_asset_desk';
+
+  // Drop-in replacement for the old cloudStorage API, so the rest of the app
+  // barely had to change. shared=true → Firestore (synced across every phone).
+  // shared=false → localStorage (stays on this one device, e.g. who's logged in).
+  const cloudStorage = {
+    async get(key, shared){
+      if(!shared){
+        const v = localStorage.getItem(key);
+        return v === null ? null : {key, value: v, shared:false};
+      }
+      const snap = await db.collection(FS_COLLECTION).doc(key).get();
+      return snap.exists ? {key, value: snap.data().value, shared:true} : null;
+    },
+    async set(key, value, shared){
+      if(!shared){
+        localStorage.setItem(key, value);
+        return {key, value, shared:false};
+      }
+      await db.collection(FS_COLLECTION).doc(key).set({value});
+      return {key, value, shared:true};
+    },
+    async delete(key, shared){
+      if(!shared){
+        localStorage.removeItem(key);
+        return {key, deleted:true, shared:false};
+      }
+      await db.collection(FS_COLLECTION).doc(key).delete();
+      return {key, deleted:true, shared:true};
+    }
+  };
+
+  // Live sync: whenever any phone changes shared data, every other open phone
+  // updates automatically — no manual refresh needed.
+  function watchShared(key, applyFn){
+    db.collection(FS_COLLECTION).doc(key).onSnapshot((snap)=>{
+      if(!snap.exists) return;
+      try{
+        applyFn(JSON.parse(snap.data().value));
+        if($('appShell').style.display !== 'none'){ renderAll(); }
+        else { renderLoginStaffList(); }
+      }catch(err){ /* ignore malformed remote data */ }
+    }, (err)=>{ /* offline or permissions issue — local data still works */ });
+  }
+
   function toast(msg, kind){
     const t = $('toast');
     t.textContent = msg;
@@ -612,15 +670,15 @@
   // ---------- Storage ----------
   async function loadAll(){
     try{
-      const e = await window.storage.get('equipment-list', true);
+      const e = await cloudStorage.get('equipment-list', true);
       equipment = e ? JSON.parse(e.value) : [];
     }catch(err){ equipment = []; }
     try{
-      const s = await window.storage.get('staff-list', true);
+      const s = await cloudStorage.get('staff-list', true);
       staff = s ? JSON.parse(s.value) : [];
     }catch(err){ staff = []; }
     try{
-      const l = await window.storage.get('activity-log', true);
+      const l = await cloudStorage.get('activity-log', true);
       log = l ? JSON.parse(l.value) : [];
     }catch(err){ log = []; }
     await loadCurrentUser();
@@ -628,15 +686,15 @@
   }
 
   async function saveEquipment(){
-    try{ await window.storage.set('equipment-list', JSON.stringify(equipment), true); }
+    try{ await cloudStorage.set('equipment-list', JSON.stringify(equipment), true); }
     catch(err){ toast('Could not save — try again', 'err'); }
   }
   async function saveStaff(){
-    try{ await window.storage.set('staff-list', JSON.stringify(staff), true); }
+    try{ await cloudStorage.set('staff-list', JSON.stringify(staff), true); }
     catch(err){ toast('Could not save — try again', 'err'); }
   }
   async function saveLog(){
-    try{ await window.storage.set('activity-log', JSON.stringify(log.slice(0,200)), true); }
+    try{ await cloudStorage.set('activity-log', JSON.stringify(log.slice(0,200)), true); }
     catch(err){ toast('Could not save — try again', 'err'); }
   }
 
@@ -656,7 +714,7 @@
 
   async function loadCurrentUser(){
     try{
-      const r = await window.storage.get('current-user', false); // personal, not shared — per device
+      const r = await cloudStorage.get('current-user', false); // personal, not shared — per device
       if(r){
         const parsed = JSON.parse(r.value);
         if(staff.some(s=>s.id === parsed.id)){
@@ -670,13 +728,13 @@
 
   async function setCurrentUser(staffMember){
     currentUser = {id: staffMember.id, name: staffMember.name};
-    try{ await window.storage.set('current-user', JSON.stringify(currentUser), false); }catch(err){}
+    try{ await cloudStorage.set('current-user', JSON.stringify(currentUser), false); }catch(err){}
     showApp();
   }
 
   async function logOut(){
     currentUser = null;
-    try{ await window.storage.delete('current-user', false); }catch(err){}
+    try{ await cloudStorage.delete('current-user', false); }catch(err){}
     showLogin();
   }
 
@@ -1170,7 +1228,11 @@
     renderSearchResults();
   }
 
-  loadAll();
+  loadAll().then(()=>{
+    watchShared('equipment-list', (data)=>{ equipment = data; });
+    watchShared('staff-list', (data)=>{ staff = data; });
+    watchShared('activity-log', (data)=>{ log = data; });
+  });
 
   if('serviceWorker' in navigator){
     window.addEventListener('load', ()=>{
