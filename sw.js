@@ -1,4 +1,4 @@
-const CACHE_NAME = 'asset-desk-v1';
+const CACHE_NAME = 'asset-desk-v2';
 const APP_SHELL = [
   './index.html',
   './manifest.json',
@@ -22,25 +22,17 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// App shell (same-origin): cache-first, so the app opens instantly and works offline.
-// Everything else (fonts, jsQR, qrcode.js from CDN): network-first, falling back to cache if offline.
+// Network-first everywhere: always tries to fetch the latest version first,
+// so updates you deploy show up the next time the app is opened with a signal.
+// Falls back to the cached copy only when there's no connection (offline use).
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
-  const isSameOrigin = url.origin === self.location.origin;
-
-  if (isSameOrigin) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => cached || fetch(event.request))
-    );
-  } else {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
-  }
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
 });

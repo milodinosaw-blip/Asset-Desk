@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Asset Desk — Equipment Checkout</title>
+<title>E3A Asset Desk — Equipment Checkout</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1B2A41">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Asset Desk">
+<meta name="apple-mobile-web-app-title" content="E3A Asset Desk">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -183,6 +183,8 @@
   .btn-primary{background:var(--navy);color:var(--cream);}
   .btn-amber{background:var(--amber);color:var(--navy);}
   .btn-outline{background:transparent;color:var(--navy);border:1.5px solid var(--navy);}
+  .mode-btn.active-out{background:var(--rust);color:#fff;border-color:var(--rust);}
+  .mode-btn.active-in{background:var(--green);color:#fff;border-color:var(--green);}
   .btn-danger{background:var(--rust);color:#fff;}
   .btn-row{display:flex;gap:10px;}
   .btn-row .btn{width:auto;flex:1;}
@@ -425,12 +427,32 @@
 <body>
 <div class="app">
 
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen" style="display:flex;flex-direction:column;min-height:100vh;background:var(--navy);color:var(--cream);padding:32px 22px;">
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+      <div class="brand" style="font-size:26px;margin-bottom:4px;"><span class="dot"></span>E3A Asset Desk</div>
+      <div style="font-size:13px;color:#B9C2CF;margin-bottom:28px;font-family:'JetBrains Mono',monospace;">Select your name to continue</div>
+
+      <div id="loginStaffList" style="display:flex;flex-direction:column;gap:9px;margin-bottom:22px;"></div>
+
+      <div style="background:var(--navy-light);border-radius:12px;padding:16px;">
+        <span class="field-label" style="color:#B9C2CF;">Not on the list?</span>
+        <input type="text" id="loginNewStaffName" placeholder="Enter your full name" style="width:100%;padding:12px 14px;border-radius:9px;border:none;font-family:'Inter',sans-serif;font-size:14.5px;margin:8px 0;">
+        <button class="btn btn-amber" id="loginAddStaffBtn">Add Me &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="appShell" style="display:none;">
+
   <header class="top">
-    <div class="brand"><span class="dot"></span>Asset Desk</div>
+    <div class="brand"><span class="dot"></span>E3A Asset Desk</div>
     <div class="sub" id="deviceCount">— equipment tracker</div>
     <div class="acting-as">
-      <label>Acting as</label>
-      <select id="actingAs" class="field"></select>
+      <label>Logged in as</label>
+      <span id="loggedInName" style="flex:1;font-weight:600;font-size:14px;color:var(--cream);"></span>
+      <button id="switchUserBtn" style="background:none;border:1px solid #4A5A73;color:#B9C2CF;font-size:11px;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:0.5px;padding:6px 10px;border-radius:6px;cursor:pointer;">Switch</button>
     </div>
   </header>
 
@@ -439,8 +461,14 @@
     <!-- SCAN PANEL -->
     <section class="panel active" id="panel-scan">
       <h2 class="section-title">Scan</h2>
+
+      <div class="btn-row" style="margin-bottom:14px;">
+        <button class="btn btn-outline mode-btn" id="modeCheckout" data-mode="checkout">Check Out</button>
+        <button class="btn btn-outline mode-btn" id="modeCheckin" data-mode="checkin">Check In</button>
+      </div>
+
       <div class="scan-box" id="scanBox">
-        <div class="placeholder" id="scanPlaceholder">Tap "Start Camera"<br>to scan a barcode or QR tag</div>
+        <div class="placeholder" id="scanPlaceholder">Pick Check Out or Check In above,<br>then tap "Start Camera"</div>
         <video id="video" style="display:none" playsinline muted></video>
         <div class="frame" id="scanFrame" style="display:none"></div>
       </div>
@@ -490,6 +518,7 @@
         <button class="btn btn-outline" id="printAllBtn">Print QR Tags</button>
         <button class="btn btn-outline" id="exportBtn">Export to Excel</button>
       </div>
+      <button class="btn btn-danger" id="clearAllBtn" style="margin-top:10px;">Clear All Items &amp; Log</button>
     </section>
 
     <!-- LOG PANEL -->
@@ -546,6 +575,7 @@
     </div>
   </div>
 
+  </div><!-- /appShell -->
 </div>
 
 <script>
@@ -593,7 +623,8 @@
       const l = await window.storage.get('activity-log', true);
       log = l ? JSON.parse(l.value) : [];
     }catch(err){ log = []; }
-    renderAll();
+    await loadCurrentUser();
+    if(currentUser){ showApp(); } else { showLogin(); }
   }
 
   async function saveEquipment(){
@@ -620,17 +651,78 @@
     });
   });
 
-  // ---------- Acting as ----------
-  function renderActingAs(){
-    const sel = $('actingAs');
-    const cur = sel.value;
+  // ---------- Login (no password — pick your name from the staff list) ----------
+  let currentUser = null; // {id, name}
+
+  async function loadCurrentUser(){
+    try{
+      const r = await window.storage.get('current-user', false); // personal, not shared — per device
+      if(r){
+        const parsed = JSON.parse(r.value);
+        if(staff.some(s=>s.id === parsed.id)){
+          currentUser = parsed;
+          return;
+        }
+      }
+    }catch(err){ /* not logged in yet */ }
+    currentUser = null;
+  }
+
+  async function setCurrentUser(staffMember){
+    currentUser = {id: staffMember.id, name: staffMember.name};
+    try{ await window.storage.set('current-user', JSON.stringify(currentUser), false); }catch(err){}
+    showApp();
+  }
+
+  async function logOut(){
+    currentUser = null;
+    try{ await window.storage.delete('current-user', false); }catch(err){}
+    showLogin();
+  }
+
+  function showLogin(){
+    $('loginScreen').style.display = 'flex';
+    $('appShell').style.display = 'none';
+    renderLoginStaffList();
+  }
+
+  function showApp(){
+    $('loginScreen').style.display = 'none';
+    $('appShell').style.display = 'block';
+    $('loggedInName').textContent = currentUser ? currentUser.name : '';
+    renderAll();
+  }
+
+  function renderLoginStaffList(){
+    const wrap = $('loginStaffList');
     if(staff.length === 0){
-      sel.innerHTML = '<option value="">Add staff first →</option>';
+      wrap.innerHTML = '<div style="color:#8996A6;font-size:13px;">No staff added yet — add yourself below.</div>';
       return;
     }
-    sel.innerHTML = staff.map(s=>`<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    if(cur && staff.some(s=>s.id===cur)) sel.value = cur;
+    wrap.innerHTML = staff.map(s => `
+      <button data-staffid="${s.id}" style="width:100%;text-align:left;background:var(--navy-light);border:none;color:var(--cream);padding:14px 16px;border-radius:10px;font-family:'Inter',sans-serif;font-weight:600;font-size:15px;cursor:pointer;">
+        ${escapeHtml(s.name)}
+      </button>
+    `).join('');
+    wrap.querySelectorAll('button').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const s = staff.find(x=>x.id === b.dataset.staffid);
+        if(s) setCurrentUser(s);
+      });
+    });
   }
+
+  $('loginAddStaffBtn').addEventListener('click', async ()=>{
+    const name = $('loginNewStaffName').value.trim();
+    if(!name){ toast('Enter your name', 'err'); return; }
+    const newStaff = {id: uid('ST'), name};
+    staff.push(newStaff);
+    await saveStaff();
+    $('loginNewStaffName').value = '';
+    setCurrentUser(newStaff);
+  });
+
+  $('switchUserBtn').addEventListener('click', logOut);
 
   function escapeHtml(str){
     const d = document.createElement('div');
@@ -884,6 +976,10 @@
         if(inUse){ toast('This person currently has equipment checked out', 'err'); return; }
         staff = staff.filter(s=>s.id!==id);
         await saveStaff();
+        if(currentUser && currentUser.id === id){
+          await logOut();
+          return;
+        }
         renderAll();
       });
     });
@@ -917,29 +1013,75 @@
     });
   }
 
-  // ---------- Scan handling ----------
+  // ---------- Scan mode (Check Out / Check In) ----------
+  let scanMode = null;
+
+  function setScanMode(mode){
+    scanMode = mode;
+    $('modeCheckout').classList.toggle('active-out', mode === 'checkout');
+    $('modeCheckin').classList.toggle('active-in', mode === 'checkin');
+    $('scanPlaceholder').innerHTML = mode
+      ? `Ready to <b>${mode === 'checkout' ? 'Check Out' : 'Check In'}</b> — tap "Start Camera"`
+      : 'Pick Check Out or Check In above,<br>then tap "Start Camera"';
+  }
+  $('modeCheckout').addEventListener('click', ()=> setScanMode(scanMode==='checkout' ? null : 'checkout'));
+  $('modeCheckin').addEventListener('click', ()=> setScanMode(scanMode==='checkin' ? null : 'checkin'));
+
+  // ---------- Scan handling (instant — no confirmation step, for fast repeat scanning) ----------
   function handleScannedItem(scannedValue){
+    if(!currentUser){ toast('You need to be logged in', 'err'); return; }
+    if(!scanMode){ toast('Pick Check Out or Check In first', 'err'); return; }
+
     // Accept raw barcode text, or the app's own generated "EQUIP:<barcode>" QR payload
     const value = (scannedValue.match(/^EQUIP:(.+)$/) || [null, scannedValue])[1].trim();
     const item = equipment.find(e=>e.barcode.toLowerCase() === value.toLowerCase());
     if(!item){ toast('No equipment matches that barcode — add it in Inventory first', 'err'); return; }
-    const actorId = $('actingAs').value;
-    if(!actorId){ toast('Add a staff member first, then select "Acting as"', 'err'); return; }
-    const actor = staff.find(s=>s.id===actorId);
+    const actor = currentUser;
 
-    if(item.status === 'available'){
-      pendingAction = {type:'checkout', item, actor};
-      $('modalTitle').textContent = 'Check Out';
-      $('modalBody').textContent = `Check out "${item.name}" to ${actor.name}?`;
+    if(scanMode === 'checkout'){
+      if(item.status === 'checked_out'){
+        const holder = staff.find(s=>s.id===item.holderId);
+        toast(`"${item.name}" is already out${holder ? ' — with '+holder.name : (item.event ? ' — for '+item.event : '')}`, 'err');
+        return;
+      }
+      item.status = 'checked_out';
+      item.holderId = actor.id;
+      item.checkedOutAt = Date.now();
+      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkout', ts:Date.now()});
+      toast(`✓ "${item.name}" checked out to ${actor.name}`, 'ok');
     } else {
-      const holder = staff.find(s=>s.id===item.holderId);
-      const withWhom = holder ? holder.name : (item.event ? `out for ${item.event}` : 'someone');
-      pendingAction = {type:'checkin', item, actor};
-      $('modalTitle').textContent = 'Check In';
-      $('modalBody').textContent = `Check in "${item.name}" (currently ${holder ? 'with '+withWhom : withWhom})? Marks it ready to go back to storage.`;
+      if(item.status === 'available'){
+        toast(`"${item.name}" is already checked in`, 'err');
+        return;
+      }
+      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkin', ts:Date.now()});
+      item.status = 'available';
+      item.holderId = null;
+      item.checkedOutAt = null;
+      item.event = null;
+      item.eventLocation = null;
+      item.returnedDate = new Date().toISOString();
+      toast(`✓ "${item.name}" checked in`, 'ok');
     }
-    $('confirmModal').classList.add('show');
+
+    saveEquipment();
+    saveLog();
+    renderAll();
+    $('searchInput').value = '';
+    $('searchResults').innerHTML = '';
   }
+
+  // ---------- Clear all ----------
+  $('clearAllBtn').addEventListener('click', ()=>{
+    if(equipment.length === 0 && log.length === 0){ toast('Already empty', 'err'); return; }
+    const stillOut = equipment.filter(e=>e.status==='checked_out').length;
+    pendingAction = {type:'clear'};
+    $('modalTitle').textContent = 'Clear Everything?';
+    $('modalBody').textContent = stillOut > 0
+      ? `${stillOut} item(s) are still checked out. This deletes ALL equipment and the activity log for everyone — staff list is kept. This cannot be undone.`
+      : `This deletes ALL equipment and the activity log for everyone — staff list is kept. This cannot be undone.`;
+    $('confirmModal').classList.add('show');
+  });
 
   $('modalCancel').addEventListener('click', ()=>{
     $('confirmModal').classList.remove('show');
@@ -948,30 +1090,16 @@
 
   $('modalConfirm').addEventListener('click', async ()=>{
     if(!pendingAction) return;
-    const {type, item, actor} = pendingAction;
-    if(type === 'checkout'){
-      item.status = 'checked_out';
-      item.holderId = actor.id;
-      item.checkedOutAt = Date.now();
-      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkout', ts:Date.now()});
-      toast(`"${item.name}" checked out to ${actor.name}`, 'ok');
-    } else {
-      log.unshift({id: uid('LG'), equipId:item.id, equipName:item.name, staffName:actor.name, action:'checkin', ts:Date.now()});
-      item.status = 'available';
-      item.holderId = null;
-      item.checkedOutAt = null;
-      item.event = null;
-      item.eventLocation = null;
-      item.returnedDate = new Date().toISOString();
-      toast(`"${item.name}" checked in`, 'ok');
+    if(pendingAction.type === 'clear'){
+      equipment = [];
+      log = [];
+      await saveEquipment();
+      await saveLog();
+      renderAll();
     }
-    await saveEquipment();
-    await saveLog();
-    renderAll();
     $('confirmModal').classList.remove('show');
     pendingAction = null;
-    $('searchInput').value = '';
-    $('searchResults').innerHTML = '';
+    toast('Everything cleared', 'ok');
   });
 
   // ---------- Camera (ZXing: reads QR codes and standard 1D barcodes) ----------
@@ -1034,7 +1162,6 @@
   }
 
   function renderAll(){
-    renderActingAs();
     renderInventory();
     renderStaffList();
     renderLog();

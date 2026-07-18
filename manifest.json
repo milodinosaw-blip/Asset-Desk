@@ -1,6 +1,6 @@
 {
-  "name": "Asset Desk — Equipment Checkout",
-  "short_name": "Asset Desk",
+  "name": "E3A Asset Desk — Equipment Checkout",
+  "short_name": "E3A Asset Desk",
   "description": "Scan, check out, and check in office equipment.",
   "start_url": "./index.html",
   "scope": "./",
